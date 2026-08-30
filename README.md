@@ -352,3 +352,30 @@ asdf reshim neovim
 </details>
 
 </details>
+
+### Additional macOS Setup
+
+- **Rust** (`brew install rust`) — required to build the blink.cmp fuzzy matching library.
+  After installing, run: `cd ~/.local/share/nvim/site/pack/core/opt/blink.cmp && cargo build --release`
+
+
+  ### Additional macOS Setup
+
+- **Nerd Font** — install a Nerd Font for icons/glyphs to render correctly:
+  `brew install --cask font-jetbrains-mono-nerd-font`
+  Then set it in iTerm2: Preferences → Profiles → Text → Font
+  Also set `vim.g.have_nerd_font = true` in init.lua
+
+- **tree-sitter CLI** (`brew install tree-sitter-cli`) — required to build treesitter parsers.
+  Without it, parsers like luadoc, query, and vimdoc will fail to build.
+
+- **ripgrep** (`brew install ripgrep`) — required for Telescope fuzzy finding.
+
+- **fd** (`brew install fd`) — faster alternative to find, used by Telescope.
+
+- **Rust** (`brew install rust`) — required to build the blink.cmp fuzzy matching library.
+  After installing, run:
+  `cd ~/.local/share/nvim/site/pack/core/opt/blink.cmp && cargo build --release`
+
+- **neovim npm package** — required for Node.js provider:
+  `npm install -g neovim`

@@ -99,7 +99,7 @@ do
   vim.g.maplocalleader = ' '
 
   -- Set to true if you have a Nerd Font installed and selected in the terminal
-  vim.g.have_nerd_font = false
+  vim.g.have_nerd_font = true
 
   -- [[ Setting options ]]
   --  See `:help vim.o`
@@ -194,8 +194,11 @@ do
     underline = { severity = { min = vim.diagnostic.severity.WARN } },
 
     -- Can switch between these as you prefer
-    virtual_text = true, -- Text shows up at the end of the line
-    virtual_lines = false, -- Text shows up underneath the line, with virtual lines
+    -- changging virtual_text to false @my_changes and changgin virtual_lines = false to something else
+    -- virtual_text = true, -- Text shows up at the end of the line
+    virtual_text = false, -- Text shows up at the end of the line
+    -- virtual_lines = false, -- Text shows up underneath the line, with virtual lines
+    virtual_lines = { only_current_line = true}, -- Text shows up underneath the line, with virtual lines
 
     -- Auto open the float, so you can easily read the errors when jumping with `[d` and `]d`
     jump = {
@@ -243,6 +246,15 @@ do
   -- [[ Basic Autocommands ]]
   --  See `:help lua-guide-autocommands`
 
+  -- Auto-reload buffers when files change on disk (e.g. edited by an external
+  -- tool in another pane). Polls on a timer instead of relying on focus/cursor
+  -- events, since terminal panes don't reliably send FocusGained when switched.
+  vim.o.autoread = true
+  local reload_timer = vim.uv.new_timer()
+  reload_timer:start(0, 1000, vim.schedule_wrap(function()
+    if vim.fn.mode() ~= 'c' then vim.cmd 'checktime' end
+  end))
+
   -- Highlight when yanking (copying) text
   --  Try it with `yap` in normal mode
   --  See `:help vim.hl.on_yank()`
@@ -251,6 +263,17 @@ do
     group = vim.api.nvim_create_augroup('kickstart-highlight-yank', { clear = true }),
     callback = function() vim.hl.on_yank() end,
   })
+
+  -- Autosave: like VS Code's "files.autoSave: afterDelay" — writes the current
+  -- buffer once a second if it has unsaved changes, including while still
+  -- typing in insert mode. Only for normal, named, modifiable buffers (skips
+  -- e.g. nvim-tree, telescope prompts).
+  local autosave_timer = vim.uv.new_timer()
+  autosave_timer:start(0, 1000, vim.schedule_wrap(function()
+    local buf = vim.api.nvim_get_current_buf()
+    if vim.bo[buf].buftype ~= '' or not vim.bo[buf].modifiable or vim.fn.bufname(buf) == '' then return end
+    if vim.bo[buf].modified and vim.fn.mode() ~= 'c' then vim.cmd 'silent! noautocmd write' end
+  end))
 end
 
 -- ============================================================
@@ -359,6 +382,15 @@ do
       topdelete = { text = '‾' }, ---@diagnostic disable-line: missing-fields
       changedelete = { text = '~' }, ---@diagnostic disable-line: missing-fields
     },
+    -- on_attach runs once per buffer when gitsigns activates, registering buffer-local keymaps
+    on_attach = function(bufnr)
+      local gs = package.loaded.gitsigns
+      -- Jump between hunks (changed sections) in the file
+      vim.keymap.set('n', ']c', gs.next_hunk, { buffer = bufnr, desc = 'Next git hunk' })
+      vim.keymap.set('n', '[c', gs.prev_hunk, { buffer = bufnr, desc = 'Previous git hunk' })
+      -- Show a diff popup for the hunk under the cursor
+      vim.keymap.set('n', '<leader>hp', gs.preview_hunk, { buffer = bufnr, desc = '[H]unk [P]review' })
+    end,
   }
 
   -- Useful plugin to show you pending keybinds.
@@ -371,6 +403,7 @@ do
     spec = {
       { '<leader>s', group = '[S]earch', mode = { 'n', 'v' } },
       { '<leader>t', group = '[T]oggle' },
+      { '<leader>g', group = '[G]it' },
       { '<leader>h', group = 'Git [H]unk', mode = { 'n', 'v' } }, -- Enable gitsigns recommended keymaps first
       { 'gr', group = 'LSP Actions', mode = { 'n' } },
     },
@@ -393,7 +426,45 @@ do
   -- Load the colorscheme here.
   -- Like many other themes, this one has different styles, and you could load
   -- any other, such as 'tokyonight-storm', 'tokyonight-moon', or 'tokyonight-day'.
-  vim.cmd.colorscheme 'tokyonight-night'
+  vim.cmd.colorscheme 'industry'
+
+  -- adding file tree
+  vim.pack.add { gh 'nvim-tree/nvim-tree.lua' }
+  vim.pack.add { gh 'nvim-tree/nvim-web-devicons' }
+  require('nvim-tree').setup {
+    -- Highlight the current file in the tree whenever you switch buffers or jump to a definition
+    update_focused_file = { enable = true },
+    git = { enable = true },
+    filters = { git_ignored = false},
+    renderer = {
+      icons = {
+        show = {
+          git = true,
+        },
+      },
+    },
+  }
+
+  vim.keymap.set('n', '<leader>e', ':NvimTreeToggle<CR>', { desc = 'Toggle file tree' })
+
+  -- Inline image/SVG preview (in buffers, markdown, and the nvim-tree file tree).
+  -- Requires a graphics-capable terminal (Kitty, WezTerm, Ghostty) and, for
+  -- SVG rasterization, `librsvg` (`brew install librsvg`).
+  vim.pack.add { gh '3rd/image.nvim' }
+  require('image').setup {
+    backend = 'kitty',
+    integrations = {
+      markdown = { enabled = true },
+      neorg = { enabled = true },
+      nvim_tree = { enabled = true },
+    },
+    max_width = 100,
+    max_height = 12,
+    max_width_window_percentage = math.huge,
+    max_height_window_percentage = 50,
+    window_overlap_clear_enabled = true,
+    editor_only_render_when_focused = true,
+  }
 
   -- Highlight todo, notes, etc in comments
   vim.pack.add { gh 'folke/todo-comments.nvim' }
@@ -483,6 +554,7 @@ do
     gh 'nvim-lua/plenary.nvim',
     gh 'nvim-telescope/telescope.nvim',
     gh 'nvim-telescope/telescope-ui-select.nvim',
+    gh 'nvim-telescope/telescope-media-files.nvim', -- image/svg preview in the picker (needs `chafa`, and `librsvg` for svg)
   }
   if vim.fn.executable 'make' == 1 then table.insert(telescope_plugins, gh 'nvim-telescope/telescope-fzf-native.nvim') end
 
@@ -502,18 +574,26 @@ do
     -- pickers = {}
     extensions = {
       ['ui-select'] = { require('telescope.themes').get_dropdown() },
+      media_files = {
+        filetypes = { 'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'pdf' },
+        find_cmd = 'rg',
+      },
     },
   }
 
   -- Enable Telescope extensions if they are installed
   pcall(require('telescope').load_extension, 'fzf')
   pcall(require('telescope').load_extension, 'ui-select')
+  pcall(require('telescope').load_extension, 'media_files')
 
   -- See `:help telescope.builtin`
   local builtin = require 'telescope.builtin'
   vim.keymap.set('n', '<leader>sh', builtin.help_tags, { desc = '[S]earch [H]elp' })
   vim.keymap.set('n', '<leader>sk', builtin.keymaps, { desc = '[S]earch [K]eymaps' })
   vim.keymap.set('n', '<leader>sf', builtin.find_files, { desc = '[S]earch [F]iles' })
+  vim.keymap.set('n', '<leader>sF', function()
+  builtin.find_files({ no_ignore = true, hidden = true })
+end, { desc = '[S]earch [F]iles (ignored)' }) 
   vim.keymap.set('n', '<leader>ss', builtin.builtin, { desc = '[S]earch [S]elect Telescope' })
   vim.keymap.set({ 'n', 'v' }, '<leader>sw', builtin.grep_string, { desc = '[S]earch current [W]ord' })
   vim.keymap.set('n', '<leader>sg', builtin.live_grep, { desc = '[S]earch by [G]rep' })
@@ -582,6 +662,12 @@ do
 
   -- Shortcut for searching your Neovim configuration files
   vim.keymap.set('n', '<leader>sn', function() builtin.find_files { cwd = vim.fn.stdpath 'config', follow = true } end, { desc = '[S]earch [N]eovim files' })
+
+  -- Show all files with git changes (modified, added, deleted) in a Telescope picker
+  vim.keymap.set('n', '<leader>gs', builtin.git_status, { desc = '[G]it [S]tatus' })
+
+  -- Find media files (images, svg, pdf) with a live preview in the picker
+  vim.keymap.set('n', '<leader>fm', '<cmd>Telescope media_files<cr>', { desc = '[F]ind [M]edia files (preview)' })
 end
 
 -- ============================================================
@@ -701,9 +787,11 @@ do
     --    https://github.com/pmizio/typescript-tools.nvim
     --
     -- But for many setups, the LSP (`ts_ls`) will work just fine
-    -- ts_ls = {},
-
+    ts_ls = {},
+    bashls = {},
     stylua = {}, -- Used to format Lua code
+    pyright = {}, -- Python LSP (types, go-to-def, hover)
+    ruff = {}, -- Python linter (unused imports, bugs, style) — runs alongside pyright
 
     -- Special Lua Config, as recommended by neovim help docs
     lua_ls = {
@@ -786,7 +874,7 @@ do
       -- You can specify filetypes to autoformat on save here:
       local enabled_filetypes = {
         -- lua = true,
-        -- python = true,
+        python = true, -- runs ruff_fix + ruff_format below on every save
       }
       if enabled_filetypes[vim.bo[bufnr].filetype] then
         return { timeout_ms = 500 }
@@ -801,7 +889,8 @@ do
     formatters_by_ft = {
       -- rust = { 'rustfmt' },
       -- Conform can also run multiple formatters sequentially
-      -- python = { "isort", "black" },
+      -- ruff_fix removes unused imports/etc, ruff_format matches `ruff format` (black-compatible)
+      python = { 'ruff_fix', 'ruff_format' },
       --
       -- You can use 'stop_after_first' to run the first available formatter from the list
       -- javascript = { "prettierd", "prettier", stop_after_first = true },
@@ -956,6 +1045,51 @@ do
 end
 
 -- ============================================================
+-- SECTION 9.5: DEBUGGER (DAP)
+-- nvim-dap + nvim-dap-python + nvim-dap-ui
+-- ============================================================
+do
+  -- Python debugging needs `debugpy` installed in each project's own venv
+  -- (add it to that project's dev dependencies — not global to this config).
+  vim.pack.add {
+    gh 'mfussenegger/nvim-dap',
+    gh 'rcarriga/nvim-dap-ui',
+    gh 'nvim-neotest/nvim-nio', -- dependency of dap-ui
+    gh 'mfussenegger/nvim-dap-python',
+    gh 'theHamsta/nvim-dap-virtual-text',
+  }
+
+  local dap = require 'dap'
+  local dapui = require 'dapui'
+
+  dapui.setup {}
+  require('nvim-dap-virtual-text').setup {}
+
+  -- Point at the venv's python so debugpy resolves the project's own interpreter/deps.
+  -- NOTE: getcwd() is nvim's cwd at startup, so this only finds the right .venv when
+  -- nvim is opened from the project root — same requirement as pyright's `venvPath`
+  -- in that project's pyrightconfig.json. Falls back to whatever `python3` is on PATH.
+  local venv_python = vim.fn.getcwd() .. '/.venv/bin/python'
+  require('dap-python').setup(vim.uv.fs_stat(venv_python) and venv_python or 'python3')
+
+  -- Auto open/close the UI panel (variables, stack, breakpoints, repl) when a session starts/ends
+  dap.listeners.after.event_initialized['dapui_config'] = function() dapui.open() end
+  dap.listeners.before.event_terminated['dapui_config'] = function() dapui.close() end
+  dap.listeners.before.event_exited['dapui_config'] = function() dapui.close() end
+
+  vim.keymap.set('n', '<F5>', dap.continue, { desc = 'Debug: Start/Continue' })
+  vim.keymap.set('n', '<F10>', dap.step_over, { desc = 'Debug: Step Over' })
+  vim.keymap.set('n', '<F11>', dap.step_into, { desc = 'Debug: Step Into' })
+  vim.keymap.set('n', '<F12>', dap.step_out, { desc = 'Debug: Step Out' })
+  vim.keymap.set('n', '<leader>db', dap.toggle_breakpoint, { desc = '[D]ebug Toggle [B]reakpoint' })
+  vim.keymap.set('n', '<leader>dr', dap.repl.toggle, { desc = '[D]ebug Toggle [R]epl' })
+  vim.keymap.set('n', '<leader>du', dapui.toggle, { desc = '[D]ebug Toggle [U]I' })
+  vim.keymap.set('n', '<leader>dt', function()
+    require('dap-python').test_method()
+  end, { desc = '[D]ebug [T]est method under cursor' })
+end
+
+-- ============================================================
 -- SECTION 10: OPTIONAL EXAMPLES / NEXT STEPS
 -- kickstart.plugins.* examples
 -- ============================================================
@@ -981,6 +1115,20 @@ do
   --  Uncomment the following line and add your plugins to `lua/custom/plugins/*.lua` to get going.
   -- require 'custom.plugins'
 end
+
+-- ============================================================
+-- CHANGELOG
+-- ============================================================
+-- 2026-08-27: Autosave writes now use `noautocmd` so the per-second
+--   background write no longer triggers BufWrite autocmds (conform's
+--   format_on_save, fidget notifications, etc). Manual :w still runs
+--   autocmds and shows notifications as normal.
+-- 2026-08-28: Added image/SVG preview support: `image.nvim` (Section 4) for
+--   inline rendering in buffers, markdown, and the nvim-tree file tree
+--   (backend = 'kitty'; requires a graphics-capable terminal, and `librsvg`
+--   for SVG rasterization); `telescope-media-files.nvim` (Section 5) for
+--   preview-on-select in a dedicated `<leader>fm` picker (requires `chafa`,
+--   and `rg`/`fd` for its find_cmd).
 
 -- The line beneath this is called `modeline`. See `:help modeline`
 -- vim: ts=2 sts=2 sw=2 et
