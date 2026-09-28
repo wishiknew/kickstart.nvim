@@ -20,6 +20,10 @@ Cross-references are by number: *see 3.2*.
 
 ---
 
+> **Looking for a specific key?** `KEYMAPS.md` is a complete, generated
+> reference of every mapping in this config. Inside nvim, `<leader>sk` searches
+> them live. This cookbook covers the *why*; that file covers the *what*.
+
 ## Setup at a glance
 
 | | |
@@ -660,18 +664,76 @@ The gutter glyphs are `+` add, `~` change, `_` delete, `‾` top-delete, `~` cha
 <leader>hp      " see what it was before
 ```
 
-**Discussion.** kickstart ships a much larger gitsigns keymap set — stage hunk, reset
-hunk, blame line, diff this — in `lua/kickstart/plugins/gitsigns.lua`, but it's commented
-out at `init.lua:1151`. Everything else goes through `:Git` (fugitive-style commands I've
-tried: `:Git blame`, `:Git diff %`) or the shell (9.2). If hunk-staging becomes a habit,
-uncommenting that file is the move.
+**Discussion.** The full gitsigns keymap set is now wired directly into the
+`on_attach` in `init.lua`, not pulled from `lua/kickstart/plugins/gitsigns.lua`.
+That file stays commented out on purpose: it calls `gitsigns.setup()` a second
+time, which would overwrite the custom `signs` table. Anything gitsigns doesn't
+cover still goes through the shell (9.2).
+
+| Key | Does |
+|---|---|
+| `<leader>hs` / `<leader>hr` | Stage / reset the hunk (also works on a visual selection) |
+| `<leader>hS` / `<leader>hR` | Stage / reset the whole buffer |
+| `<leader>hp` / `<leader>hi` | Preview the hunk in a popup / inline |
+| `<leader>hd` / `<leader>hD` | Diff against the index / the last commit |
+| `<leader>hq` / `<leader>hQ` | Send hunks to the quickfix list (this file / all files) |
+| `dih`, `vih` | The hunk as a text object |
+
+---
+
+## 6.2 Technique: Blame, in three levels of detail
+
+**Problem.** "Who wrote this line, and why?" has three different answers depending
+on how much context I need, and reaching for the wrong one wastes time.
+
+**Solution.** Start passive, escalate on demand.
+
+```
+                " level 1: always on, no keypress.
+                " ghost text at end of line, follows the cursor:
+                "     Jane Doe, 3 months ago · fix null check
+<leader>tb      " toggle that off when it gets noisy
+
+<leader>gb      " level 2: popup for THIS line — full commit message + the
+                " diff hunk that introduced it
+
+<leader>gB      " level 3: full-file blame in a scroll-bound split, the
+                " closest thing to the GitHub blame view.
+                " <CR> on a line opens that commit and re-blames through its
+                " parent, so you can walk backwards through history.
+```
+
+**Discussion.** Level 1 is `current_line_blame` and it's on at startup. Three
+settings make it liveable, all in the `gitsigns.setup` call:
+
+- `delay = 300` — the default 1000ms feels laggy when scanning a file. Under
+  about 150ms it flickers while navigating.
+- `ignore_whitespace = true` — without this, a single reformat commit claims
+  every line in the file. This is the setting that makes always-on blame
+  tolerable rather than actively misleading.
+- `use_focus = true` — blame renders only in the focused window, so splits
+  don't fill with ghost text.
+
+The format string is `'  <author>, <author_time:%R> · <summary>'`. `%R` is
+relative time; swap it for `%Y-%m-%d` if absolute dates read better. Setting
+`virt_text_pos = 'right_align'` instead of `'eol'` pins blame to the window
+edge, which is closer to how GitHub lays it out — worth trying both.
+
+**Q: Is there a hover-style blame, like an LSP hover?**
+No, and it isn't missed. `<leader>gb` is the on-demand version and the inline
+ghost text is the passive one; between them there's nothing a hover would add.
+
+**Q: What about opening the line's commit on GitHub?**
+Not wired up. gitsigns doesn't do it — that needs something like
+`ruifm/gitlinker.nvim` or snacks.nvim's `gitbrowse`. Deliberately left out
+until it's actually wanted.
 
 ---
 
 # 7. Markdown, images, and previews
 
 All of this lives in `lua/custom/plugins/markdown.lua`, which only became live when
-`require 'custom.plugins'` was uncommented at `init.lua:1156` — the directory was dead
+`require 'custom.plugins'` was uncommented at `init.lua:1313` — the directory was dead
 code before that. Files there are auto-loaded: drop in `lua/custom/plugins/anything.lua`
 and it's required at startup.
 
@@ -1192,13 +1254,13 @@ Leader is `<Space>`. Everything below is from this repo; `→` means "defined at
 
 ### Available but switched off
 
-All six live under `lua/kickstart/plugins/`, commented out at `init.lua:1146-1151`:
+All six live under `lua/kickstart/plugins/`, commented out at `init.lua:1303-1308`:
 
 | File | Would add | Why it's off |
 |---|---|---|
 | `neo-tree.lua` | neo-tree file tree on `\` | Superseded by nvim-tree |
 | `debug.lua` | DAP for **Go** (delve) with different F-keys | Would collide with my Python DAP — see D.4 |
-| `gitsigns.lua` | The full gitsigns keymap set (stage / reset / blame) | Only the three keys in ch. 6 are wired up |
+| `gitsigns.lua` | The full gitsigns keymap set (stage / reset / blame) | Equivalent maps are wired directly into `on_attach` instead; this file would re-run `setup()` and clobber the custom `signs` table |
 | `lint.lua` | nvim-lint, markdownlint for markdown | Python linting comes from the `ruff` LSP instead |
 | `indent_line.lua` | indent-blankline guide lines | Not enabled |
 | `autopairs.lua` | Automatic bracket pairs | Not enabled |

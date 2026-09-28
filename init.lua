@@ -257,6 +257,36 @@ do
   -- vim.keymap.set("n", "<C-S-j>", "<C-w>J", { desc = "Move window to the lower" })
   -- vim.keymap.set("n", "<C-S-k>", "<C-w>K", { desc = "Move window to the upper" })
 
+  -- Resize the current window. Arrow keys are otherwise unused here, and this
+  -- avoids the <C-w>+/- dance.
+  vim.keymap.set('n', '<C-Up>', '<cmd>resize +2<CR>', { desc = 'Grow window height' })
+  vim.keymap.set('n', '<C-Down>', '<cmd>resize -2<CR>', { desc = 'Shrink window height' })
+  vim.keymap.set('n', '<C-Right>', '<cmd>vertical resize +2<CR>', { desc = 'Grow window width' })
+  vim.keymap.set('n', '<C-Left>', '<cmd>vertical resize -2<CR>', { desc = 'Shrink window width' })
+
+  -- [[ Buffers ]]
+  -- ]b / [b already cycle buffers (Neovim defaults). This closes one.
+  vim.keymap.set('n', '<leader>bd', '<cmd>bdelete<CR>', { desc = '[B]uffer [D]elete' })
+  vim.keymap.set('n', '<leader>bo', '<cmd>%bdelete|edit#|bdelete#<CR>', { desc = '[B]uffer close [O]thers' })
+
+  -- [[ Editing quality-of-life ]]
+  -- Keep the selection after indenting, so >>> is just > > >.
+  vim.keymap.set('v', '<', '<gv', { desc = 'Indent left, keep selection' })
+  vim.keymap.set('v', '>', '>gv', { desc = 'Indent right, keep selection' })
+
+  -- Move the selected lines up/down, reindenting as they go.
+  vim.keymap.set('v', 'J', ":m '>+1<CR>gv=gv", { desc = 'Move selection down' })
+  vim.keymap.set('v', 'K', ":m '<-2<CR>gv=gv", { desc = 'Move selection up' })
+
+  -- Paste over a selection without the replaced text clobbering the unnamed
+  -- register, so you can paste the same thing repeatedly.
+  vim.keymap.set('x', '<leader>p', [["_dP]], { desc = '[P]aste without yanking selection' })
+
+  -- Centre the view when jumping through search results, so the match never
+  -- lands at the very bottom of the screen. zv opens any fold around it.
+  vim.keymap.set('n', 'n', 'nzzzv', { desc = 'Next search result, centred' })
+  vim.keymap.set('n', 'N', 'Nzzzv', { desc = 'Prev search result, centred' })
+
   -- [[ Basic Autocommands ]]
   --  See `:help lua-guide-autocommands`
 
@@ -396,14 +426,71 @@ do
       topdelete = { text = '‾' }, ---@diagnostic disable-line: missing-fields
       changedelete = { text = '~' }, ---@diagnostic disable-line: missing-fields
     },
+    -- [[ Inline blame ]]
+    -- Ghost text at end of line showing who last touched it, GitLens-style.
+    -- Follows the cursor; toggle with <leader>tb.
+    current_line_blame = true,
+    current_line_blame_opts = {
+      virt_text = true,
+      -- 'eol' trails the code; 'right_align' pins blame to the window edge,
+      -- closer to the GitHub blame gutter. Swap if you prefer that.
+      virt_text_pos = 'eol',
+      -- Default is 1000ms, which feels laggy when scanning a file. Below
+      -- ~150ms it flickers while navigating.
+      delay = 300,
+      -- Without this, reformat commits claim every line - the single biggest
+      -- annoyance with always-on blame.
+      ignore_whitespace = true,
+      -- Only render blame in the focused window, so splits stay clean.
+      use_focus = true,
+    },
+    -- <author_time:%R> is relative ("3 months ago"); use %Y-%m-%d for absolute.
+    current_line_blame_formatter = '  <author>, <author_time:%R> · <summary>',
+
     -- on_attach runs once per buffer when gitsigns activates, registering buffer-local keymaps
     on_attach = function(bufnr)
       local gs = package.loaded.gitsigns
-      -- Jump between hunks (changed sections) in the file
-      vim.keymap.set('n', ']c', gs.next_hunk, { buffer = bufnr, desc = 'Next git hunk' })
-      vim.keymap.set('n', '[c', gs.prev_hunk, { buffer = bufnr, desc = 'Previous git hunk' })
-      -- Show a diff popup for the hunk under the cursor
-      vim.keymap.set('n', '<leader>hp', gs.preview_hunk, { buffer = bufnr, desc = '[H]unk [P]review' })
+      local function map(mode, lhs, rhs, desc)
+        vim.keymap.set(mode, lhs, rhs, { buffer = bufnr, desc = desc })
+      end
+
+      -- [[ Navigate ]]
+      -- nav_hunk replaces the deprecated next_hunk/prev_hunk.
+      map('n', ']c', function() gs.nav_hunk 'next' end, 'Next git hunk')
+      map('n', '[c', function() gs.nav_hunk 'prev' end, 'Previous git hunk')
+
+      -- [[ Blame ]]
+      -- Three views, in ascending order of detail:
+      --   <leader>tb  toggle the inline ghost text (passive, follows cursor)
+      --   <leader>gb  popup for this line, with the commit message + diff
+      --   <leader>gB  full-file blame in a scroll-bound split (GitHub-like);
+      --               <CR> on a line opens that commit, and re-blames through
+      --               the parent so you can walk history backwards.
+      map('n', '<leader>tb', gs.toggle_current_line_blame, '[T]oggle git [b]lame line')
+      map('n', '<leader>gb', function() gs.blame_line { full = true } end, '[G]it [b]lame line (popup)')
+      map('n', '<leader>gB', gs.blame, '[G]it [B]lame full file (split)')
+
+      -- [[ Stage / reset ]]
+      map('n', '<leader>hs', gs.stage_hunk, 'Git [s]tage hunk')
+      map('n', '<leader>hr', gs.reset_hunk, 'Git [r]eset hunk')
+      map('v', '<leader>hs', function() gs.stage_hunk { vim.fn.line '.', vim.fn.line 'v' } end, 'Git [s]tage selection')
+      map('v', '<leader>hr', function() gs.reset_hunk { vim.fn.line '.', vim.fn.line 'v' } end, 'Git [r]eset selection')
+      map('n', '<leader>hS', gs.stage_buffer, 'Git [S]tage buffer')
+      map('n', '<leader>hR', gs.reset_buffer, 'Git [R]eset buffer')
+
+      -- [[ Inspect ]]
+      map('n', '<leader>hp', gs.preview_hunk, '[H]unk [P]review')
+      map('n', '<leader>hi', gs.preview_hunk_inline, 'Git preview hunk [i]nline')
+      map('n', '<leader>hd', gs.diffthis, 'Git [d]iff against index')
+      map('n', '<leader>hD', function() gs.diffthis '@' end, 'Git [D]iff against last commit')
+      map('n', '<leader>hq', gs.setqflist, 'Git hunks -> [q]uickfix (this file)')
+      map('n', '<leader>hQ', function() gs.setqflist 'all' end, 'Git hunks -> [Q]uickfix (all files)')
+
+      -- [[ Toggles ]]
+      map('n', '<leader>tw', gs.toggle_word_diff, '[T]oggle git intra-line [w]ord diff')
+
+      -- Hunk as a textobject: `dih` deletes it, `vih` selects it.
+      map({ 'o', 'x' }, 'ih', gs.select_hunk, '[i]nner git [h]unk')
     end,
   }
 
@@ -1293,6 +1380,25 @@ end
 --   auth than a local brew instance on the same port; make sure you know
 --   which one is actually serving 6379. With a password: `redis://:pw@host:6379/0`.
 --   Connection URLs themselves now live in the gitignored lua/custom/local.lua.
+
+-- 2026-09-28: Git blame, in three levels of detail (see COOKBOOK ch. 6.2):
+--   inline ghost text via `current_line_blame` (on at startup, <leader>tb to
+--   toggle), <leader>gb for a per-line popup with the commit message and the
+--   diff that introduced it, and <leader>gB for a scroll-bound full-file
+--   blame split. Three settings make always-on blame liveable:
+--   `delay = 300` (the 1000ms default feels laggy), `ignore_whitespace`
+--   (otherwise one reformat commit claims every line) and `use_focus`
+--   (blame only in the focused window).
+--   Also wired the rest of the gitsigns set directly into `on_attach`
+--   (stage/reset/diff/quickfix + the `ih` hunk textobject) rather than
+--   uncommenting lua/kickstart/plugins/gitsigns.lua, which would call
+--   `setup()` a second time and clobber the custom `signs` table.
+--   Replaced the deprecated `next_hunk`/`prev_hunk` with `nav_hunk`.
+--   Added window resize on <C-arrows>, <leader>bd/<leader>bo for buffers,
+--   and the usual editing QoL (indent keeps the selection, visual J/K moves
+--   lines, <leader>p pastes without clobbering the register, n/N centre).
+--   KEYMAPS.md is a full reference, generated from the live config by
+--   scripts/gen-keymaps.lua so it cannot drift.
 
 -- The line beneath this is called `modeline`. See `:help modeline`
 -- vim: ts=2 sts=2 sw=2 et
