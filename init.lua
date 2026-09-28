@@ -752,7 +752,14 @@ do
   -- See `:help telescope.builtin`
   local builtin = require 'telescope.builtin'
   vim.keymap.set('n', '<leader>sh', builtin.help_tags, { desc = '[S]earch [H]elp' })
-  vim.keymap.set('n', '<leader>sk', builtin.keymaps, { desc = '[S]earch [K]eymaps' })
+  -- Telescope's keymaps picker defaults to modes { n, i, c, x }, which hides
+  -- operator-pending and terminal maps - `ih` as a text object, `<Esc><Esc>`
+  -- to leave terminal mode. Ask for every mode instead.
+  -- `show_plug = false` drops the <Plug> entries, which are plumbing, not keys
+  -- anyone presses.
+  vim.keymap.set('n', '<leader>sk', function()
+    builtin.keymaps { modes = { 'n', 'i', 'c', 'x', 'v', 'o', 't', 's' }, show_plug = false }
+  end, { desc = '[S]earch [K]eymaps' })
   vim.keymap.set('n', '<leader>sf', builtin.find_files, { desc = '[S]earch [F]iles' })
   vim.keymap.set('n', '<leader>sF', function()
   builtin.find_files({ no_ignore = true, hidden = true })
@@ -1316,89 +1323,11 @@ end
 -- ============================================================
 -- CHANGELOG
 -- ============================================================
--- 2026-08-27: Autosave writes now use `noautocmd` so the per-second
---   background write no longer triggers BufWrite autocmds (conform's
---   format_on_save, fidget notifications, etc). Manual :w still runs
---   autocmds and shows notifications as normal.
--- 2026-08-28: Added image/SVG preview support: `image.nvim` (Section 4) for
---   inline rendering in buffers, markdown, and the nvim-tree file tree
---   (backend = 'kitty'; requires a graphics-capable terminal, and `librsvg`
---   for SVG rasterization); `telescope-media-files.nvim` (Section 5) for
---   preview-on-select in a dedicated `<leader>fm` picker (requires `chafa`,
---   and `rg`/`fd` for its find_cmd).
-
--- 2026-09-01: Markdown preview + fixed the 2026-08-28 image support, which
---   never actually rendered. Corrections to that entry: `image.nvim`'s
---   processor (`magick_cli`) needs ImageMagick, which was missing; `backend`
---   is no longer hardcoded to 'kitty' but detected from TERM_PROGRAM /
---   KITTY_WINDOW_ID, resolving to 'sixel' on iTerm2 (which does NOT speak the
---   Kitty protocol) and 'kitty' on Ghostty/WezTerm/Kitty - override with
---   $IMAGE_NVIM_BACKEND; and `integrations.nvim_tree` does not exist in
---   current image.nvim (no such file under lua/image/integrations/) so it was
---   silently ignored - removed. Viewing an image from the tree works via
---   `hijack_file_patterns` instead: <CR> on an image renders it in a buffer.
---   Sizing: dropped `max_width`/`max_height`, which are absolute caps in
---   columns/rows applied AFTER the percentage caps, so `max_height = 12`
---   overrode them and shrank every image; now 100% window width / 80% height.
---   `max_width_window_percentage = math.huge` passed the plugin's
---   `type(x) == 'number'` guard and computed math.floor(inf) - now 100.
---   Added `<leader>ti` / `:ImageToggle` to toggle inline images, since images
---   are drawn over the window and cannot reflow around text.
---   Also: `require 'custom.plugins'` was commented out, so the whole
---   lua/custom/plugins/ directory was dead code - enabled.
---   New lua/custom/plugins/markdown.lua adds `render-markdown.nvim`
---   (in-buffer rendering, `<leader>tm`), a glow-based float (`:Glow`,
---   `<leader>mp`, needs `brew install glow`), and a `:Telescope markdown`
---   picker (`<leader>sm`, `<leader>sM` for hidden/ignored, `<leader>sG` to
---   grep markdown only, `<C-g>` in-picker to open the highlighted file in
---   glow). Installed `poppler` so telescope-media-files' `pdf` filetype -
---   listed since 2026-08-28 but needing `pdftoppm` - actually previews.
---   Also adds `sel` in Visual mode ([S]urround [E]very [L]ine): wraps each
---   selected line individually with a character read after the mapping,
---   which mini.surround's visual `sa` cannot do (it treats the selection as
---   one span). Indentation and trailing whitespace stay outside the markers,
---   blank lines are skipped, and the whole range is one undo step. Note the
---   range is read via line('v')/line('.') because '< and '> are not set
---   until visual mode ends.
-
--- 2026-09-23: Notes on using a Redis connection in `vim.g.dbs` alongside a
---   Postgres one, reachable from `<leader>Do`. No plugin needed - vim-dadbod
---   already ships a redis adapter (autoload/db/adapter/redis.vim).
---   Worth knowing before reaching for it: that adapter is a thin shell-out to
---   `redis-cli`, translating the URL into `-h -p --user -a -n` flags (and
---   `--tls` for `rediss://`). So the query buffer takes raw Redis commands
---   (`SCAN`, `HGETALL`, `TTL`), not SQL, and dadbod-ui's schema tree stays
---   empty - there are no tables to expand, just a connection and a scratch
---   buffer. The `/0` path maps to `-n 0`, selecting the DB index.
---   Prefer `SCAN` over `KEYS`: irrelevant locally, but `KEYS` blocks the
---   server and the reflex carries.
---   On passwords: omit one if the server is unauthenticated. Passing `-a` to
---   a server with no password makes redis-cli print `AUTH failed: ERR AUTH
---   <password> called without any password configured` before every result -
---   commands still run, but the noise also feeds dadbod's auth-failure
---   sniffing. A containerised Redis (docker-compose) usually has different
---   auth than a local brew instance on the same port; make sure you know
---   which one is actually serving 6379. With a password: `redis://:pw@host:6379/0`.
---   Connection URLs themselves now live in the gitignored lua/custom/local.lua.
-
--- 2026-09-28: Git blame, in three levels of detail (see COOKBOOK ch. 6.2):
---   inline ghost text via `current_line_blame` (on at startup, <leader>tb to
---   toggle), <leader>gb for a per-line popup with the commit message and the
---   diff that introduced it, and <leader>gB for a scroll-bound full-file
---   blame split. Three settings make always-on blame liveable:
---   `delay = 300` (the 1000ms default feels laggy), `ignore_whitespace`
---   (otherwise one reformat commit claims every line) and `use_focus`
---   (blame only in the focused window).
---   Also wired the rest of the gitsigns set directly into `on_attach`
---   (stage/reset/diff/quickfix + the `ih` hunk textobject) rather than
---   uncommenting lua/kickstart/plugins/gitsigns.lua, which would call
---   `setup()` a second time and clobber the custom `signs` table.
---   Replaced the deprecated `next_hunk`/`prev_hunk` with `nav_hunk`.
---   Added window resize on <C-arrows>, <leader>bd/<leader>bo for buffers,
---   and the usual editing QoL (indent keeps the selection, visual J/K moves
---   lines, <leader>p pastes without clobbering the register, n/N centre).
---   KEYMAPS.md is a full reference, generated from the live config by
---   scripts/gen-keymaps.lua so it cannot drift.
+-- Moved to CHANGELOG.md, at the root of this repo.
+--
+-- Entries record why a change was made, not just what changed, so they are
+-- prose rather than config and do not belong in this file. Add new ones
+-- there, newest last.
 
 -- The line beneath this is called `modeline`. See `:help modeline`
 -- vim: ts=2 sts=2 sw=2 et

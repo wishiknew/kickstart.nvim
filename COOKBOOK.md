@@ -23,6 +23,9 @@ Cross-references are by number: *see 3.2*.
 > **Looking for a specific key?** `KEYMAPS.md` is a complete, generated
 > reference of every mapping in this config. Inside nvim, `<leader>sk` searches
 > them live. This cookbook covers the *why*; that file covers the *what*.
+>
+> **Wondering when something changed, and why?** `CHANGELOG.md` records each
+> change to this config along with the reasoning behind it.
 
 ## Setup at a glance
 
