@@ -5,10 +5,15 @@ nvim
 
 spell/
 
-# In your personal fork, you likely want to comment this, since it's recommended to track
-# nvim-pack-lock.json in version control - see :help vim.pack-lockfile
-# For the official `nvim-lua/kickstart.nvim` git repository, we leave it ignored to avoid unneeded
-# merge conflicts.
-nvim-pack-lock.json
+# This is a personal fork, so the pack lockfile IS tracked - see :help vim.pack-lockfile
+# (upstream kickstart ignores it to avoid merge conflicts; we want reproducible plugin versions).
+# nvim-pack-lock.json
 
 .DS_Store
+
+# Local editor backups (init.lua.bak, init.lua.bak-<timestamp>)
+*.bak
+*.bak-*
+
+# Machine-local config: credentials, project-specific DB connections
+lua/custom/local.lua
