@@ -1,0 +1,11 @@
+-- Copy this file to `lua/custom/local.lua` (which is gitignored) and fill in
+-- your own values. `local.lua` is optional - init.lua falls back to empty
+-- defaults when it is absent, so a fresh clone works with no setup.
+return {
+  -- Connections for vim-dadbod-ui, opened with <leader>Do.
+  -- Keys become the connection names shown in the DBUI tree.
+  dbs = {
+    -- myapp    = 'postgres://user:password@localhost:5432/myapp',
+    -- myapp_redis = 'redis://localhost:6379/0',
+  },
+}

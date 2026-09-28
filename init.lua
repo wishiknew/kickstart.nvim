@@ -158,6 +158,10 @@ do
   vim.o.list = true
   vim.opt.listchars = { tab = '» ', trail = '·', nbsp = '␣' }
 
+  -- adding a unnamedplus clipboard
+  -- adding this to simply use yy to copy and p to paste anywhere from any
+  -- window to other window
+  vim.opt.clipboard = 'unnamedplus'
   -- Preview substitutions live, as you type!
   vim.o.inccommand = 'split'
 
@@ -171,6 +175,16 @@ do
   -- instead raise a dialog asking if you wish to save the current file(s)
   -- See `:help 'confirm'`
   vim.o.confirm = true
+
+  -- Make `:grep` use ripgrep instead of system grep, so flags like `-i`,
+  -- `--hidden` and `--no-ignore` work and hits land in the quickfix list.
+  --   :grep -i pattern          → search cwd, case-insensitive
+  --   :grep -i pattern backend/ → restrict to one folder
+  --   :copen                    → open the results list
+  -- smart-case: all-lowercase query matches any case; add a capital to force
+  -- case-sensitive. An explicit `-i` always wins.
+  vim.o.grepprg = 'rg --vimgrep --smart-case'
+  vim.o.grepformat = '%f:%l:%c:%m'
 end
 
 -- ============================================================
@@ -448,27 +462,88 @@ do
   vim.keymap.set('n', '<leader>e', ':NvimTreeToggle<CR>', { desc = 'Toggle file tree' })
 
   -- Inline image/SVG preview (in buffers, markdown, and the nvim-tree file tree).
-  -- Requires a graphics-capable terminal (Kitty, WezTerm, Ghostty) and, for
-  -- SVG rasterization, `librsvg` (`brew install librsvg`).
+  -- Requires ImageMagick (`brew install imagemagick`) to decode/resize, plus
+  -- `librsvg` (`brew install librsvg`) for SVG rasterization.
+  --
+  -- The backend is the escape-sequence protocol used to push pixels to the
+  -- terminal, and terminals do not agree on one:
+  --   kitty - Kitty, WezTerm, Ghostty
+  --   sixel - iTerm2, foot, mlterm, Windows Terminal
+  -- Picking the wrong one means images silently never appear, so detect it.
+  local function image_backend()
+    if vim.env.IMAGE_NVIM_BACKEND then return vim.env.IMAGE_NVIM_BACKEND end
+    local term = (vim.env.TERM_PROGRAM or ''):lower()
+    if term == 'iterm.app' then return 'sixel' end
+    if term:match 'wezterm' or term:match 'ghostty' or vim.env.KITTY_WINDOW_ID then return 'kitty' end
+    if (vim.env.TERM or ''):match 'kitty' then return 'kitty' end
+    return 'sixel' -- widest support; kitty-only terminals are caught above
+  end
+
   vim.pack.add { gh '3rd/image.nvim' }
   require('image').setup {
-    backend = 'kitty',
+    backend = image_backend(),
     integrations = {
       markdown = { enabled = true },
       neorg = { enabled = true },
-      nvim_tree = { enabled = true },
     },
-    max_width = 100,
-    max_height = 12,
-    max_width_window_percentage = math.huge,
-    max_height_window_percentage = 50,
+    -- Sizing: `max_width`/`max_height` are absolute caps in columns/rows and
+    -- are applied AFTER the percentage caps, so a small `max_height` silently
+    -- overrides everything. Leave them unset and constrain by window share.
+    --
+    -- Because a cell is roughly twice as tall as it is wide, a landscape
+    -- screenshot needs many more rows than you'd guess to fill the width -
+    -- which is why a row cap bites long before a column cap does.
+    max_width = nil,
+    max_height = nil,
+    max_width_window_percentage = 100,
+    max_height_window_percentage = 80,
     window_overlap_clear_enabled = true,
     editor_only_render_when_focused = true,
+    -- Opening one of these files renders it as an image instead of showing
+    -- raw bytes. This is what makes <CR> on an image in nvim-tree work.
+    hijack_file_patterns = { '*.png', '*.jpg', '*.jpeg', '*.gif', '*.webp', '*.avif', '*.svg' },
   }
+
+  -- [[ Toggle inline images ]]
+  -- Mirrors `<leader>tm` (RenderMarkdown toggle). Images are pixels drawn over
+  -- the window, so they can obscure text while editing - hence a quick off switch.
+  local image_api = require 'image'
+  vim.api.nvim_create_user_command('ImageToggle', function()
+    if image_api.is_enabled() then
+      image_api.disable()
+      vim.notify('Inline images: off', vim.log.levels.INFO)
+    else
+      image_api.enable()
+      vim.notify('Inline images: on', vim.log.levels.INFO)
+    end
+  end, { desc = 'Toggle inline image rendering' })
+
+  vim.keymap.set('n', '<leader>ti', '<cmd>ImageToggle<CR>', { desc = '[T]oggle [I]mages' })
 
   -- Highlight todo, notes, etc in comments
   vim.pack.add { gh 'folke/todo-comments.nvim' }
   require('todo-comments').setup { signs = false }
+
+  -- Database client: browse connections/schemas/tables and run queries from nvim
+  -- Skip our custom ~/.psqlrc for dadbod's internal psql calls, since its
+  -- \pset/\timing feedback lines get misparsed as schema/table rows.
+  vim.env.PSQLRC = '/dev/null'
+  vim.pack.add {
+    gh 'tpope/vim-dadbod',
+    gh 'kristijanhusak/vim-dadbod-ui',
+  }
+  vim.g.db_ui_use_nerd_fonts = 1
+  -- Database connections are project-specific and often carry credentials, so
+  -- they live in `lua/custom/local.lua`, which is gitignored. This fork is
+  -- public - nothing work-specific belongs in a tracked file.
+  -- Copy `lua/custom/local.lua.example` to `lua/custom/local.lua` and fill it in.
+  --
+  -- Note on Redis: dadbod shells out to redis-cli, so the query buffer takes
+  -- raw Redis commands (HGETALL/SCAN/TTL), not SQL, and there's no schema
+  -- tree. A `/0` path selects DB index 0.
+  local ok_local, local_cfg = pcall(require, 'custom.local')
+  vim.g.dbs = (ok_local and type(local_cfg) == 'table' and local_cfg.dbs) or {}
+  vim.keymap.set('n', '<leader>Do', '<cmd>DBUIToggle<CR>', { desc = '[D]atabase UI [O]pen/close' })
 
   -- [[ mini.nvim ]]
   --  A collection of various small independent plugins/modules
@@ -565,12 +640,13 @@ do
   require('telescope').setup {
     -- You can put your default mappings / updates / etc. in here
     --  All the info you're looking for is in `:help telescope.setup()`
-    --
-    -- defaults = {
-    --   mappings = {
-    --     i = { ['<c-enter>'] = 'to_fuzzy_refine' },
-    --   },
-    -- },
+    defaults = {
+      mappings = {
+        -- Insert-mode mappings, active while the Telescope prompt is open.
+        -- TODO(human): pick a key to hand off from ripgrep to fuzzy matching.
+        i = {},
+      },
+    },
     -- pickers = {}
     extensions = {
       ['ui-select'] = { require('telescope.themes').get_dropdown() },
@@ -597,6 +673,18 @@ end, { desc = '[S]earch [F]iles (ignored)' })
   vim.keymap.set('n', '<leader>ss', builtin.builtin, { desc = '[S]earch [S]elect Telescope' })
   vim.keymap.set({ 'n', 'v' }, '<leader>sw', builtin.grep_string, { desc = '[S]earch current [W]ord' })
   vim.keymap.set('n', '<leader>sg', builtin.live_grep, { desc = '[S]earch by [G]rep' })
+  -- Same grep, but nothing hidden: searches dotfiles (.env) and .gitignore'd
+  -- paths too, forced case-insensitive, always rooted at the project root
+  -- rather than nvim's cwd. ("search [a]ll" — <leader>sG is markdown-only
+  -- grep, see lua/custom/plugins/markdown.lua.)
+  vim.keymap.set('n', '<leader>sa', function()
+    local root = vim.fs.root(0, { '.git', 'pyproject.toml', 'package.json' }) or vim.uv.cwd()
+    builtin.live_grep {
+      cwd = root,
+      additional_args = { '-i', '--hidden', '--no-ignore' },
+      prompt_title = 'Grep (all files, case-insensitive): ' .. vim.fn.fnamemodify(root, ':t'),
+    }
+  end, { desc = '[S]earch [A]ll files (hidden + ignored, case-insensitive)' })
   vim.keymap.set('n', '<leader>sd', builtin.diagnostics, { desc = '[S]earch [D]iagnostics' })
   vim.keymap.set('n', '<leader>sr', builtin.resume, { desc = '[S]earch [R]esume' })
   vim.keymap.set('n', '<leader>s.', builtin.oldfiles, { desc = '[S]earch Recent Files ("." for repeat)' })
@@ -916,7 +1004,7 @@ do
   --    See the README about individual language/framework/plugin snippets:
   --    https://github.com/rafamadriz/friendly-snippets
   --
-  -- vim.pack.add { gh 'rafamadriz/friendly-snippets' }
+
   -- require('luasnip.loaders.from_vscode').lazy_load()
 
   -- [[ Autocomplete Engine ]]
@@ -979,6 +1067,28 @@ do
 
     -- Shows a signature help window while you type arguments for a function
     signature = { enabled = true },
+  }
+
+  -- [[ AI Inline Completion ]]
+  -- Predictive ghost-text completion (the "Cursor Tab" experience).
+  -- Requires a GitHub Copilot subscription; run `:Copilot auth` once to sign in.
+  vim.pack.add { gh 'zbirenbaum/copilot.lua' }
+  require('copilot').setup {
+    suggestion = {
+      enabled = true,
+      -- Suggest as you type, rather than only on an explicit trigger key.
+      auto_trigger = true,
+      -- Critical for coexisting with blink.cmp: suppress the ghost text while
+      -- the completion menu is open, so the two don't render on top of each other.
+      hide_during_completion = true,
+      -- TODO(human): choose the keys for accepting/cycling suggestions.
+      -- Leaving this empty uses copilot.lua's defaults (<M-l> to accept).
+      keymap = {},
+    },
+    -- The split-window panel UI; redundant when inline suggestions are on.
+    panel = { enabled = false },
+    -- Opt in per filetype beyond the built-in defaults.
+    filetypes = { markdown = true, gitcommit = true },
   }
 end
 
@@ -1113,7 +1223,7 @@ do
   -- NOTE: You can add your own plugins, configuration, etc from `lua/custom/plugins/*.lua`
   --
   --  Uncomment the following line and add your plugins to `lua/custom/plugins/*.lua` to get going.
-  -- require 'custom.plugins'
+  require 'custom.plugins'
 end
 
 -- ============================================================
@@ -1129,6 +1239,60 @@ end
 --   for SVG rasterization); `telescope-media-files.nvim` (Section 5) for
 --   preview-on-select in a dedicated `<leader>fm` picker (requires `chafa`,
 --   and `rg`/`fd` for its find_cmd).
+
+-- 2026-09-01: Markdown preview + fixed the 2026-08-28 image support, which
+--   never actually rendered. Corrections to that entry: `image.nvim`'s
+--   processor (`magick_cli`) needs ImageMagick, which was missing; `backend`
+--   is no longer hardcoded to 'kitty' but detected from TERM_PROGRAM /
+--   KITTY_WINDOW_ID, resolving to 'sixel' on iTerm2 (which does NOT speak the
+--   Kitty protocol) and 'kitty' on Ghostty/WezTerm/Kitty - override with
+--   $IMAGE_NVIM_BACKEND; and `integrations.nvim_tree` does not exist in
+--   current image.nvim (no such file under lua/image/integrations/) so it was
+--   silently ignored - removed. Viewing an image from the tree works via
+--   `hijack_file_patterns` instead: <CR> on an image renders it in a buffer.
+--   Sizing: dropped `max_width`/`max_height`, which are absolute caps in
+--   columns/rows applied AFTER the percentage caps, so `max_height = 12`
+--   overrode them and shrank every image; now 100% window width / 80% height.
+--   `max_width_window_percentage = math.huge` passed the plugin's
+--   `type(x) == 'number'` guard and computed math.floor(inf) - now 100.
+--   Added `<leader>ti` / `:ImageToggle` to toggle inline images, since images
+--   are drawn over the window and cannot reflow around text.
+--   Also: `require 'custom.plugins'` was commented out, so the whole
+--   lua/custom/plugins/ directory was dead code - enabled.
+--   New lua/custom/plugins/markdown.lua adds `render-markdown.nvim`
+--   (in-buffer rendering, `<leader>tm`), a glow-based float (`:Glow`,
+--   `<leader>mp`, needs `brew install glow`), and a `:Telescope markdown`
+--   picker (`<leader>sm`, `<leader>sM` for hidden/ignored, `<leader>sG` to
+--   grep markdown only, `<C-g>` in-picker to open the highlighted file in
+--   glow). Installed `poppler` so telescope-media-files' `pdf` filetype -
+--   listed since 2026-08-28 but needing `pdftoppm` - actually previews.
+--   Also adds `sel` in Visual mode ([S]urround [E]very [L]ine): wraps each
+--   selected line individually with a character read after the mapping,
+--   which mini.surround's visual `sa` cannot do (it treats the selection as
+--   one span). Indentation and trailing whitespace stay outside the markers,
+--   blank lines are skipped, and the whole range is one undo step. Note the
+--   range is read via line('v')/line('.') because '< and '> are not set
+--   until visual mode ends.
+
+-- 2026-09-23: Notes on using a Redis connection in `vim.g.dbs` alongside a
+--   Postgres one, reachable from `<leader>Do`. No plugin needed - vim-dadbod
+--   already ships a redis adapter (autoload/db/adapter/redis.vim).
+--   Worth knowing before reaching for it: that adapter is a thin shell-out to
+--   `redis-cli`, translating the URL into `-h -p --user -a -n` flags (and
+--   `--tls` for `rediss://`). So the query buffer takes raw Redis commands
+--   (`SCAN`, `HGETALL`, `TTL`), not SQL, and dadbod-ui's schema tree stays
+--   empty - there are no tables to expand, just a connection and a scratch
+--   buffer. The `/0` path maps to `-n 0`, selecting the DB index.
+--   Prefer `SCAN` over `KEYS`: irrelevant locally, but `KEYS` blocks the
+--   server and the reflex carries.
+--   On passwords: omit one if the server is unauthenticated. Passing `-a` to
+--   a server with no password makes redis-cli print `AUTH failed: ERR AUTH
+--   <password> called without any password configured` before every result -
+--   commands still run, but the noise also feeds dadbod's auth-failure
+--   sniffing. A containerised Redis (docker-compose) usually has different
+--   auth than a local brew instance on the same port; make sure you know
+--   which one is actually serving 6379. With a password: `redis://:pw@host:6379/0`.
+--   Connection URLs themselves now live in the gitignored lua/custom/local.lua.
 
 -- The line beneath this is called `modeline`. See `:help modeline`
 -- vim: ts=2 sts=2 sw=2 et
